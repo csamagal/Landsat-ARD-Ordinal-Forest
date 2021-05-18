@@ -1,0 +1,302 @@
+---
+title: "Model Insights - Marine Geo"
+author: "Casey Samagalsky"
+date: "4/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ordinalForest)
+```
+
+```{r}
+setwd("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky")
+```
+
+
+```{r}
+species.list <- c("disp", "ivfr", "phau", "scam", "sppa")
+years <- 2015:2018
+
+for(i in 1:length(species.list)){
+  curr.species <- species.list[i]
+  
+  for(j in 1:length(years)){
+    year <- years[j]
+    print(curr.species)
+    print(year)
+    # Loading Ordinal Model and Test Predictions
+    load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/marine_geo/{curr.species}/{curr.species}_model_training{year}.RData"))
+    load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/marine_geo/{curr.species}/{curr.species}_predict_training{year}.RData"))
+    
+    # Load training data
+    ord_training <- read.csv(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/training data/training{year}.csv"))
+    print("Data Loaded")
+    
+    ## Data Setup-----------------------------------------
+    # Always need to factorize and order ord_training data 
+    # These columns only for marine geo
+    for (z in 5:9){
+      ord_training[,z] <- factor(ord_training[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+      ord_training[,z] <- as.ordered(ord_training[,z])
+    }
+    
+    # Re-setting up inputs and train/test data
+    seed.num <- 1000
+    set.seed(seed.num)
+    train.size = .8
+    samp_ord <- sample(nrow(ord_training), train.size * nrow(ord_training))
+    train_ord <- droplevels(ord_training[samp_ord,])
+    test_ord <- droplevels(ord_training[-samp_ord,])
+    print("Data Setup Complete")
+    
+    
+    ##Total Dataset Predictions------------------------------------
+    # Predict entire dataset
+    pred_total <- predict(ord_model, newdata = ord_training)
+    pred.values <- data.frame(pred = pred_total$ypred)
+    print("Data Predicted")
+    
+    ## Error-------------------------------------------------------
+    # Bind together entire dataset, obtain error
+    together <- cbind(pred.values, ord_training)
+    for (z in 6:13){
+      together[,z] <- factor(together[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+      together[,z] <- as.ordered(together[,z])
+    }
+    
+    # Test Accuracy and Error
+    total_cm <- confusionMatrix(together$pred, together[,which(names(together)==curr.species)])             
+    t <- total_cm$table
+    
+    accuracy <- total_cm$overall[1]
+    error <- 1-accuracy
+    names(error) <- "Error"
+    
+    # 0 positivity rate
+    accuracy_0 <- t[1,1]/sum(t[,1])
+    
+    # Weighted Error Value:
+    pascal <- round(matrix(c(1, 4/6, 1/6, 0, 0, 0, 0,  
+                             4/6, 1, 4/6, 1/6, 0, 0, 0, 
+                             1/6, 4/6, 1, 4/6, 1/6, 0, 0,
+                             0, 1/6, 4/6, 1, 4/6, 1/6, 0, 
+                             0, 0, 1/6, 4/6, 1, 4/6, 1/6,
+                             0, 0, 0, 1/6, 4/6, 1, 4/6,
+                             0, 0, 0, 0, 1/6, 4/6, 1), 
+                           nrow = 7, ncol = 7), 3)
+    error_mtx <- as.matrix(t) * as.matrix(pascal)
+    total <- right <- 0
+    
+    for(i in 1:nrow(error_mtx)){
+      for(j in 1:ncol(error_mtx)){
+        total = total + error_mtx[i,j]
+        if(i == j){
+          right = right + error_mtx[i,j]
+        }
+      }
+    }
+    weighted_error = (sum(error_mtx)-right)/sum(error_mtx)
+    print("Error Calculated")
+  
+    ## Visualizations------------------------------------------------  
+    # Graphing test values
+    if(curr.species == "phau"){
+      # red scale
+      cols = c("0"="#ceb467", "1"="#fce0e0", "2"="#ffa8a8", "3"="#f26a6a", "4"="#e83e3e", "5"="#c12020", "6"="#891818")
+    }else if(curr.species == "scam"){
+      # blue scale
+      cols=c("0"="#ceb467", "1"="#d1ddfc", "2"="#adc0f4", "3"="#8ba6f4", "4"="#5e82ed", "5"="#2c2ccc", "6"="#231572")
+    }else if(curr.species == "ivfr"){
+      # purple scale
+      cols=c("0"="#ceb467", "1"="#efbbff", "2"="#d896ff", "3"="#be29ec", "4"="#800080", "5"="#660066", "6"="#30062e")
+    }else if(curr.species == "disp"){
+      # teal scale
+      cols=c("0"="#ceb467", "1"="#b2d8d8", "2"="#66b2b2", "3"="#008080", "4"="#006666", "5"="#004c4c", "6"="#002626")
+    }else if(curr.species == "sppa"){
+      # grey scale
+      cols=c("0"="#ceb467", "1"="#EEEEEE", "2"="#CCCCCC", "3"="#bbbbbb","4"="#999999", "5"="#666666", "6"="#333333")
+    }
+
+    final.pred.graph <- ggplot() +
+      geom_rect(data=together, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+    labs(title=paste(paste("Pop. Abundance Prediction, Total Data",curr.species,"- marine geo",year)), x="Easting", y="Northing", fill="Cover") +
+    scale_x_continuous(limits = c(365430, 366280)) +
+    scale_y_continuous(limits = c(4303800, 4304470)) + 
+    scale_fill_manual(values = cols)
+    print("Visuals done")
+    
+    ## Putting in a matrix-----------------------------------------
+    
+    
+    ## Saving output ------------------------------------------------
+    setwd(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output"))
+    ggsave(paste("prediction_visual_",curr.species,year,"mg.png", sep=""))
+    print("visual saved")
+    
+    outputlist <- c(error, accuracy_0, weighted_error)
+    listname <- paste(paste("output_",curr.species,year,"mg.csv", sep=""))
+    save(outputlist, file = listname)
+    print("outputlist saved")
+    print("another year complete")
+  }
+  print("another species complete")
+}
+```
+
+Merging error values into one dataframe
+```{r}
+setwd("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output")
+species.list <- c("disp", "ivfr", "phau", "scam", "sppa")
+years <- 2015:2018
+
+for(i in 1:length(species.list)){
+  species <- species.list[i]
+  mg_error <- data.frame(error=rep(0, 4), Acc0=rep(0,4), Werror=rep(0,4), row.names = years)
+  
+  for(j in 1:length(years)){
+    year <- years[j]
+    load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/output_{species}{year}mg.RData"))
+    mg_error[j, 1] <- outputlist[1]
+    mg_error[j, 2] <- outputlist[2]
+    mg_error[j, 3] <- outputlist[3]
+  }
+  
+  mg <- paste(paste("mg_error_",species,".csv", sep=""))
+  write.csv(mg_error, file = mg)
+}
+```
+
+
+```{r}
+curr.species <- "phau"
+year <- 2016
+
+# Loading Ordinal Model and Test Predictions
+load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/marine_geo/{curr.species}/{curr.species}_model_training{year}.RData"))
+load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/marine_geo/{curr.species}/{curr.species}_predict_training{year}.RData"))
+
+# Load training data
+ord_training <- read.csv(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/training data/training{year}.csv"))
+
+    
+## Data Setup-----------------------------------------
+for (z in 5:9){
+  ord_training[,z] <- factor(ord_training[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+  ord_training[,z] <- as.ordered(ord_training[,z])
+}
+
+# Re-setting up inputs and train/test data
+seed.num <- 1000
+set.seed(seed.num)
+train.size = .8
+samp_ord <- sample(nrow(ord_training), train.size * nrow(ord_training))
+train_ord <- droplevels(ord_training[samp_ord,])
+test_ord <- droplevels(ord_training[-samp_ord,])
+
+##Total Dataset Predictions------------------------------------
+# Predict entire dataset
+pred_total <- predict(ord_model, newdata = ord_training)
+pred.values <- data.frame(pred = pred_total$ypred)
+    
+## Error-------------------------------------------------------
+# Bind together entire dataset, obtain error
+together <- cbind(pred.values, ord_training)
+for (z in 6:13){
+  together[,z] <- factor(together[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+  together[,z] <- as.ordered(together[,z])
+}
+
+## Visualizations------------------------------------------------  
+# Graphing test values
+if(curr.species == "phau"){
+  # red scale
+  cols = c("0"="#ceb467", "1"="#fce0e0", "2"="#ffa8a8", "3"="#f26a6a", "4"="#e83e3e", "5"="#c12020", "6"="#891818")
+}else if(curr.species == "scam"){
+  # blue scale
+  cols=c("0"="#ceb467", "1"="#d1ddfc", "2"="#adc0f4", "3"="#8ba6f4", "4"="#5e82ed", "5"="#2c2ccc", "6"="#231572")
+}else if(curr.species == "ivfr"){
+  # purple scale
+  cols=c("0"="#ceb467", "1"="#efbbff", "2"="#d896ff", "3"="#be29ec", "4"="#800080", "5"="#660066", "6"="#30062e")
+}else if(curr.species == "disp"){
+  # teal scale
+  cols=c("0"="#ceb467", "1"="#b2d8d8", "2"="#66b2b2", "3"="#008080", "4"="#006666", "5"="#004c4c", "6"="#002626")
+}else if(curr.species == "sppa"){
+  # grey scale
+  cols=c("0"="#ceb467", "1"="#EEEEEE", "2"="#CCCCCC", "3"="#bbbbbb","4"="#999999", "5"="#666666", "6"="#333333")
+}
+
+together2018 <- together
+```
+
+```{r}
+scam_2015 <- ggplot() +
+    geom_rect(data=together2015, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+    labs(title = 2015, x="Easting", y="Northing", fill="Cover") +
+    scale_x_continuous(limits = c(365430, 366280)) +
+    scale_y_continuous(limits = c(4303800, 4304470)) + 
+    scale_fill_manual(values = cols) +
+    theme(text = element_text(size=8))
+
+scam_2016 <- ggplot() +
+    geom_rect(data=together2016, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+    labs(title = 2016, x="Easting", y="Northing", fill="Cover") +
+    scale_x_continuous(limits = c(365430, 366280)) +
+    scale_y_continuous(limits = c(4303800, 4304470)) + 
+    scale_fill_manual(values = cols)+
+    theme(text = element_text(size=8))
+
+scam_2017 <- ggplot() +
+      geom_rect(data=together2017, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+    labs(title = 2017, x="Easting", y="Northing", fill="Cover") +
+    scale_x_continuous(limits = c(365430, 366280)) +
+    scale_y_continuous(limits = c(4303800, 4304470)) + 
+    scale_fill_manual(values = cols)+
+    theme(text = element_text(size=8))
+
+scam_2018 <- ggplot() +
+      geom_rect(data=together2018, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+    labs(title=2018, x="Easting", y="Northing", fill="Cover") +
+    scale_x_continuous(limits = c(365430, 366280)) +
+    scale_y_continuous(limits = c(4303800, 4304470)) + 
+    scale_fill_manual(values = cols)+
+    theme(text = element_text(size=8))
+
+```
+
+
+```{r}
+grid.arrange(scam_2015, scam_2016, scam_2017, scam_2018, nrow = 2)
+
+```
+
+```{r}
+together2017[,1] <- factor(together2017[,1], levels = c(0, 1, 2, 3, 4, 5, 6))
+together2017[,1] <- as.ordered(together2017[,1])
+
+together2017[1,1]<-6
+
+
+```
+
+
+```{r}
+phau2016mg <- ggplot() +
+  geom_rect(data=together, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+labs(title=paste(paste("Pop. Abundance Prediction, Total Data",curr.species,"rtk",year)), x="Easting", y="Northing", fill="Cover") +
+scale_x_continuous(limits = c(365430, 366280)) +
+scale_y_continuous(limits = c(4303800, 4304470)) + 
+scale_fill_manual(values = cols)+
+  theme_bw() +
+    theme(text = element_text(size=8))
+
+phau2016mg
+```
+

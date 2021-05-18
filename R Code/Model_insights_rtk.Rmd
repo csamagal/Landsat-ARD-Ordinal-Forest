@@ -1,0 +1,284 @@
+---
+title: "Model Insights - RTK"
+author: "Casey Samagalsky"
+date: "4/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ordinalForest)
+```
+
+```{r}
+setwd("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky")
+```
+
+
+```{r}
+species.list <- c("phau", "spcy", "tyla", "c4", "scam", "ivfr")
+years <- 2015:2019
+
+for(i in 1:length(species.list)){
+  curr.species <- species.list[i]
+  #setwd(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/rtk/{curr.species}"))
+  
+  for(j in 1:length(years)){
+    year <- years[j]
+    print(curr.species)
+    print(year)
+    # Loading Ordinal Model and Test Predictions
+    load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/rtk/{curr.species}/{curr.species}_model_training{year}rtk.RData"))
+    load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/rtk/{curr.species}/{curr.species}_predict_training{year}rtk.RData"))
+    
+    # Load training data
+    ord_training <- read.csv(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/training data/training{year}rtk.csv"))
+    print("Data Loaded")
+    
+    ## Data Setup-----------------------------------------
+    # Always need to factorize and order ord_training data 
+    # These columns only for RTK
+    for (z in 5:12){
+      ord_training[,z] <- factor(ord_training[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+      ord_training[,z] <- as.ordered(ord_training[,z])
+    }
+    
+    # Re-setting up inputs and train/test data
+    seed.num <- 1000
+    set.seed(seed.num)
+    train.size = .8
+    samp_ord <- sample(nrow(ord_training), train.size * nrow(ord_training))
+    train_ord <- droplevels(ord_training[samp_ord,])
+    test_ord <- droplevels(ord_training[-samp_ord,])
+    print("Data Setup Complete")
+    
+    
+    ##Total Dataset Predictions------------------------------------
+    # Predict entire dataset
+    pred_total <- predict(ord_model, newdata = ord_training)
+    pred.values <- data.frame(pred = pred_total$ypred)
+    print("Data Predicted")
+    
+    ## Error-------------------------------------------------------
+    # Bind together entire dataset, obtain error
+    together <- cbind(pred.values, ord_training)
+    for (z in 6:13){
+      together[,z] <- factor(together[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+      together[,z] <- as.ordered(together[,z])
+    }
+    
+    # Test Accuracy and Error
+    total_cm <- confusionMatrix(together$pred, together[,which(names(together)==curr.species)])             
+    t <- total_cm$table
+    
+    accuracy <- total_cm$overall[1]
+    error <- 1-accuracy
+    names(error) <- "Error"
+    
+    # 0 positivity rate
+    accuracy_0 <- t[1,1]/sum(t[,1])
+    
+    # Weighted Error Value:
+    pascal <- round(matrix(c(1, 4/6, 1/6, 0, 0, 0, 0,  
+                             4/6, 1, 4/6, 1/6, 0, 0, 0, 
+                             1/6, 4/6, 1, 4/6, 1/6, 0, 0,
+                             0, 1/6, 4/6, 1, 4/6, 1/6, 0, 
+                             0, 0, 1/6, 4/6, 1, 4/6, 1/6,
+                             0, 0, 0, 1/6, 4/6, 1, 4/6,
+                             0, 0, 0, 0, 1/6, 4/6, 1), 
+                           nrow = 7, ncol = 7), 3)
+    error_mtx <- as.matrix(t) * as.matrix(pascal)
+    total <- right <- 0
+    
+    for(i in 1:nrow(error_mtx)){
+      for(j in 1:ncol(error_mtx)){
+        total = total + error_mtx[i,j]
+        if(i == j){
+          right = right + error_mtx[i,j]
+        }
+      }
+    }
+    weighted_error = (sum(error_mtx)-right)/sum(error_mtx)
+    print("Error Calculated")
+  
+    ## Visualizations------------------------------------------------  
+    # Graphing test values
+    if(curr.species == "c4"){
+      # green scale
+      cols = c("0"="#ceb467", "1"="#FFF59D", "2"="#DCE775", "3"="#8BC34A", "4"="#388E3C", "5"="#236429", "6"="#174a1b")
+    }else if(curr.species == "phau"){
+      # red scale
+      cols = c("0"="#ceb467", "1"="#fce0e0", "2"="#ffa8a8", "3"="#f26a6a", "4"="#e83e3e", "5"="#c12020", "6"="#891818")
+    }else if(curr.species == "scam"){
+      # blue scale
+      cols=c("0"="#ceb467", "1"="#d1ddfc", "2"="#adc0f4", "3"="#8ba6f4", "4"="#5e82ed", "5"="#2c2ccc", "6"="#231572")
+    }else if(curr.species == "ivfr"){
+      # purple scale
+      cols=c("0"="#ceb467", "1"="#efbbff", "2"="#d896ff", "3"="#be29ec", "4"="#800080", "5"="#660066", "6"="#30062e")
+    }else if(curr.species == "spcy"){
+      # brown scale
+      cols=c("0"="#ceb467", "1"="#E0AB8B", "2"="#C68863", "3"="#B06C49", "4"="#743D2B", "5"="#582F26", "6"="#3C1917")
+    }else if(curr.species == "tyla"){
+      # yellow scale
+      cols=c("0"="#ceb467", "1"="#fff9ae", "2"="#f8ed62", "3"="#e9d700", "4"="#dab600", "5"="#a98600", "6"="#9a7600")
+    }
+      
+    final.pred.graph <- ggplot() +
+      geom_rect(data=together, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+    labs(title=paste(paste("Pop. Abundance Prediction, Total Data",curr.species,"rtk",year)), x="Easting", y="Northing", fill="Cover") +
+    scale_x_continuous(limits = c(365430, 366280)) +
+    scale_y_continuous(limits = c(4303800, 4304470)) + 
+    scale_fill_manual(values = cols)
+    print("Visuals done")
+    
+    ## Saving output ------------------------------------------------
+    setwd(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output"))
+    ggsave(paste("prediction_visual_",curr.species,year,"rtk.png", sep=""))
+    print("visual saved")
+    
+    outputlist <- c(error, accuracy_0, weighted_error)
+    listname <- paste(paste("output_",curr.species,year,"rtk.RData", sep=""))
+    save(outputlist, file = listname)
+    print("outputlist saved")
+    print("another year complete")
+  }
+  print("another species complete")
+}
+```
+
+```{r}
+setwd("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output")
+species.list <- c("phau", "spcy", "tyla", "c4", "scam", "ivfr")
+years <- 2015:2019
+
+for(i in 1:length(species.list)){
+  species <- species.list[i]
+  rtk_error <- data.frame(error=rep(0, 5), Acc0=rep(0,5), Werror=rep(0,5), row.names = years)
+  
+  for(j in 1:length(years)){
+    year <- years[j]
+    load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/output_{species}{year}rtk.RData"))
+    rtk_error[j, 1] <- outputlist[1]
+    rtk_error[j, 2] <- outputlist[2]
+    rtk_error[j, 3] <- outputlist[3]
+  }
+  
+  rtk <- paste(paste("rtk_error_",species,".csv", sep=""))
+  write.csv(rtk_error, file = rtk)
+}
+```
+
+
+```{r}
+c4 <- read.csv("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/rtk_error_c4.csv")
+scam <- read.csv("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/rtk_error_scam.csv")
+phau <- read.csv("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/rtk_error_phau.csv")
+tyla <- read.csv("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/rtk_error_tyla.csv")
+ivfr <- read.csv("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/rtk_error_ivfr.csv")
+spcy <- read.csv("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/output/rtk_error_spcy.csv")
+
+Werror <- data.frame(phau[4], spcy[4], tyla[4], c4[4], scam[4], ivfr[4], row.names = years)
+colnames(Werror) <- species.list
+
+reference <- Werror[,2]
+```
+
+```{r}
+colors <- c("Phau" = "#f26a6a", "Spcy" = "#B06C49", "Tyla" = "#e9d700", "c4"="#8BC34A", "Scam"="#8ba6f4", "Ivfr"="#be29ec")
+
+error_compare <- ggplot(Werror) +
+  geom_line(aes(x=years, y=phau, color="Phau"), size=1) +
+  geom_line(aes(x=years, y=spcy, color="Spcy"), size=1) +
+  geom_line(aes(x=years, y=tyla, color="Tyla"), size=1) +
+  geom_line(aes(x=years, y=c4, color="c4"), size=1) +
+  geom_line(aes(x=years, y=scam, color="Scam"), size=1) +
+  geom_line(aes(x=years, y=ivfr, color="Ivfr"), size=1) + 
+  labs(title = "Weighted Error by rtk Species", subtitle = "(2015-2019)",
+       x = "Year", y = "Weighted Error",color = "Species") +
+  theme_minimal() +
+  scale_color_manual(values = colors)
+
+error_compare
+```
+
+```{r}
+curr.species <- "phau"
+year <- 2016
+
+# Loading Ordinal Model and Test Predictions
+load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/rtk/{curr.species}/{curr.species}_model_training{year}rtk.RData"))
+load(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/rtk/{curr.species}/{curr.species}_predict_training{year}rtk.RData"))
+
+# Load training data
+ord_training <- read.csv(glue::glue("C:/Users/cassa/Google Drive/MARSH project/Landsat ARD Data/CSamagalsky/training data/training{year}rtk.csv"))
+    
+## Data Setup-----------------------------------------
+for (z in 5:12){
+  ord_training[,z] <- factor(ord_training[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+  ord_training[,z] <- as.ordered(ord_training[,z])
+}
+    
+# Re-setting up inputs and train/test data
+seed.num <- 1000
+set.seed(seed.num)
+train.size = .8
+samp_ord <- sample(nrow(ord_training), train.size * nrow(ord_training))
+train_ord <- droplevels(ord_training[samp_ord,])
+test_ord <- droplevels(ord_training[-samp_ord,])
+
+##Total Dataset Predictions------------------------------------
+# Predict entire dataset
+pred_total <- predict(ord_model, newdata = ord_training)
+pred.values <- data.frame(pred = pred_total$ypred)
+
+# Bind together entire dataset, obtain error
+together <- cbind(pred.values, ord_training)
+for (z in 6:13){
+  together[,z] <- factor(together[,z], levels = c(0, 1, 2, 3, 4, 5, 6))
+  together[,z] <- as.ordered(together[,z])
+}
+    
+## Visualizations------------------------------------------------  
+# Graphing test values
+if(curr.species == "c4"){
+  # green scale
+  cols = c("0"="#ceb467", "1"="#FFF59D", "2"="#DCE775", "3"="#8BC34A", "4"="#388E3C", "5"="#236429", "6"="#174a1b")
+}else if(curr.species == "phau"){
+  # red scale
+  cols = c("0"="#ceb467", "1"="#fce0e0", "2"="#ffa8a8", "3"="#f26a6a", "4"="#e83e3e", "5"="#c12020", "6"="#891818")
+}else if(curr.species == "scam"){
+  # blue scale
+  cols=c("0"="#ceb467", "1"="#d1ddfc", "2"="#adc0f4", "3"="#8ba6f4", "4"="#5e82ed", "5"="#2c2ccc", "6"="#231572")
+}else if(curr.species == "ivfr"){
+  # purple scale
+  cols=c("0"="#ceb467", "1"="#efbbff", "2"="#d896ff", "3"="#be29ec", "4"="#800080", "5"="#660066", "6"="#30062e")
+}else if(curr.species == "spcy"){
+  # brown scale
+  cols=c("0"="#ceb467", "1"="#E0AB8B", "2"="#C68863", "3"="#B06C49", "4"="#743D2B", "5"="#582F26", "6"="#3C1917")
+}else if(curr.species == "tyla"){
+  # yellow scale
+  cols=c("0"="#ceb467", "1"="#fff9ae", "2"="#f8ed62", "3"="#e9d700", "4"="#dab600", "5"="#a98600", "6"="#9a7600")
+}
+  
+
+```
+
+```{r}
+phau2016rtk <- ggplot() +
+  geom_rect(data=together, aes(xmin=easting, xmax=easting + 30, ymin=northing, ymax=northing + 30, fill = as.factor(pred)), color="black") +
+labs(title=paste(paste("Pop. Abundance Prediction, Total Data",curr.species,"rtk",year)), x="Easting", y="Northing", fill="Cover") +
+scale_x_continuous(limits = c(365430, 366280)) +
+scale_y_continuous(limits = c(4303800, 4304470)) + 
+scale_fill_manual(values = cols)+
+  theme_minimal() +
+    theme(text = element_text(size=8))
+
+phau2016mg
+```
+
