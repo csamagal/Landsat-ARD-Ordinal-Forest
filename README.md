@@ -1,2 +1,8 @@
 # Landsat-ARD-Ordinal-Forest
 Ordinal Forest model classifying marsh species type based on color-indices and bandwidths of satellite imagery.
+
+
+Marshes represent a transition between land and sea. These low-lying, waterlogged areas prevent erosion of land, protect against extreme weather events, and are vital to normal ecosystem processes. Marsh plants mediate accretion by capturing sediment suspended in water and contributing root tissue below the surface. At a usual rate, as sea levels rise, the marshes are able to grow so they can stay at sea level. However, given that sea level rise is accelerating, it is unclear if marshes will be able to build elevation fast enough to keep pace. Understanding how plant cover and distribution changes over time is a first step in understanding how accretion may vary across a landscape. I used satellite imagery to quantify the cover of different marsh plant  species across a marsh in the Chesapeake Bay. 
+
+To do this, I took Landsat 8 satellite images from 2015 to 2019 in summer months encompassing  the Smithsonian Environmental Research Center marsh in the Chesapeake Bay Percent vegetation cover was recorded in classes, thus I fit the data with an ordinal random forest model. Inputs included Landsat band values and a few vegetation indices. I developed a novel weighted error classification scheme using Pascal's Triangle. Interpreting the model outputs, I can see initially that species cover does seem stable within a 5 year period and that the model produces an average weighted error of 10. Thus, these models can be used to better understand species cover in saltwater marshes. 
+
